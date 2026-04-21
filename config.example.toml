@@ -1,0 +1,6 @@
+app_port = 8080
+
+[openai]
+api_key = ""
+model = "gpt-4.1-mini"
+base_url = "https://api.openai.com/v1"

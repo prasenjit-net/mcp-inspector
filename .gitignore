@@ -1,0 +1,5 @@
+.idea/
+config.toml
+dist/
+ui/dist/
+ui/node_modules/
