@@ -1,6 +1,5 @@
-import { useMemo, useRef, useState } from 'react'
-import { useAppState } from '../state/useAppState'
-import type { ServerRecord } from '../types'
+import { useEffect, useRef, useState } from 'react'
+import { listServers } from '../lib/api'
 
 type ChatMessage = {
   id: string
@@ -10,22 +9,34 @@ type ChatMessage = {
 }
 
 export function AgentPage() {
-  const { servers } = useAppState()
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [sessionId, setSessionId] = useState('')
   const [isSending, setIsSending] = useState(false)
   const [error, setError] = useState('')
+  const [readyServerCount, setReadyServerCount] = useState(0)
   const assistantMessageIdRef = useRef('')
 
-  const readyServers = useMemo(
-    () => servers.filter((server) => server.inspectResult && server.status === 'ready'),
-    [servers],
-  )
+  useEffect(() => {
+    const controller = new AbortController()
+
+    void (async () => {
+      try {
+        const payload = await listServers(controller.signal)
+        setReadyServerCount(payload.servers.filter((server) => server.status === 'ready').length)
+      } catch {
+        if (!controller.signal.aborted) {
+          setReadyServerCount(0)
+        }
+      }
+    })()
+
+    return () => controller.abort()
+  }, [])
 
   async function handleSend() {
     const message = input.trim()
-    if (message === '' || isSending || readyServers.length === 0) {
+    if (message === '' || isSending || readyServerCount === 0) {
       return
     }
 
@@ -49,7 +60,6 @@ export function AgentPage() {
         body: JSON.stringify({
           sessionId,
           message,
-          servers: readyServers.map(serializeServerForAgent),
         }),
       })
 
@@ -159,149 +169,83 @@ export function AgentPage() {
 
   return (
     <div className="page-stack">
-      <section className="page-intro">
-        <div>
-          <h2 className="section-title">Agent</h2>
-          <p className="section-copy">Chat with a server-side OpenAI agent that can use tools from all ready MCP servers in this workspace.</p>
-        </div>
-      </section>
-
-      <section className="summary-grid">
-        <article className="card summary-card">
-          <span className="summary-label">Connected servers</span>
-          <strong>{readyServers.length}</strong>
-          <p>Only ready servers are included in the agent toolset.</p>
-        </article>
-        <article className="card summary-card">
-          <span className="summary-label">Conversation</span>
-          <strong>{messages.filter((entry) => entry.role === 'user').length}</strong>
-          <p>Server-side context is retained for this active chat session.</p>
-        </article>
-        <article className="card summary-card">
-          <span className="summary-label">Session</span>
-          <strong>{sessionId ? sessionId.slice(0, 8) : 'New'}</strong>
-          <p>Use “New chat” to reset the conversation and start fresh.</p>
-        </article>
-      </section>
-
-      <section className="content-grid">
-        <article className="card">
-          <div className="section-heading">
-            <div>
-              <h3>Available servers</h3>
-              <p>These inspected servers are available to the agent right now.</p>
-            </div>
+      <section className="card agent-chat-card">
+        <div className="section-heading">
+          <div>
+            <h2 className="section-title">Agent</h2>
+            <p className="section-copy">Chat with a server-side OpenAI agent that can use tools from all ready MCP servers in this workspace.</p>
           </div>
 
-          {readyServers.length > 0 ? (
-            <div className="tool-preview-list">
-              {readyServers.map((server) => (
-                <div key={server.id} className="tool-preview-row">
-                  <div>
-                    <strong>{server.name}</strong>
-                    <p className="tool-preview-description">{server.endpoint}</p>
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() => {
+              setMessages([])
+              setSessionId('')
+              setError('')
+            }}
+          >
+            New chat
+          </button>
+        </div>
+
+        <div className="chat-log">
+          {messages.length > 0 ? (
+            messages.map((message) => (
+              <article
+                key={message.id}
+                className={`chat-bubble chat-bubble-${message.role}`}
+              >
+                <header>
+                  <strong>{message.role === 'user' ? 'You' : 'Agent'}</strong>
+                </header>
+                <p>{message.content || 'Working…'}</p>
+                {message.activity && message.activity.length > 0 ? (
+                  <div className="chat-activity">
+                    {message.activity.slice(-4).map((entry, index) => (
+                      <p key={`${message.id}-${index}`}>{entry}</p>
+                    ))}
                   </div>
-                  <div className="tool-preview-meta">
-                    <span>{server.inspectResult?.tools.length ?? 0} tools</span>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ) : null}
+              </article>
+            ))
           ) : (
             <div className="empty-state">
-              <h3>No ready servers</h3>
-              <p>Add and inspect at least one server before using the agent.</p>
+              <h3>Start a conversation</h3>
+              <p>
+                {readyServerCount > 0
+                  ? 'Ask the agent to explore, compare, or operate across the connected MCP servers.'
+                  : 'Add and inspect at least one server before using the agent.'}
+              </p>
             </div>
           )}
-        </article>
+        </div>
 
-        <article className="card">
-          <div className="section-heading">
-            <div>
-              <h3>Chat</h3>
-              <p>Streaming updates arrive over HTTP from the backend agent session.</p>
-            </div>
+        <div className="dashboard-form">
+          <label className="field">
+            <span>Message</span>
+            <textarea
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              placeholder="Ask the agent to use the connected MCP tools..."
+              rows={4}
+            />
+          </label>
 
+          {error ? <p className="error-banner">{error}</p> : null}
+
+          <div className="form-actions">
             <button
-              className="secondary-button"
+              className="primary-button"
               type="button"
-              onClick={() => {
-                setMessages([])
-                setSessionId('')
-                setError('')
-              }}
+              disabled={isSending || readyServerCount === 0}
+              onClick={() => void handleSend()}
             >
-              New chat
+              {isSending ? 'Streaming...' : 'Send'}
             </button>
           </div>
-
-          <div className="chat-log">
-            {messages.length > 0 ? (
-              messages.map((message) => (
-                <article
-                  key={message.id}
-                  className={`chat-bubble chat-bubble-${message.role}`}
-                >
-                  <header>
-                    <strong>{message.role === 'user' ? 'You' : 'Agent'}</strong>
-                  </header>
-                  <p>{message.content || 'Working…'}</p>
-                  {message.activity && message.activity.length > 0 ? (
-                    <div className="chat-activity">
-                      {message.activity.slice(-4).map((entry, index) => (
-                        <p key={`${message.id}-${index}`}>{entry}</p>
-                      ))}
-                    </div>
-                  ) : null}
-                </article>
-              ))
-            ) : (
-              <div className="empty-state">
-                <h3>Start a conversation</h3>
-                <p>Ask the agent to explore, compare, or operate across the connected MCP servers.</p>
-              </div>
-            )}
-          </div>
-
-          <div className="dashboard-form">
-            <label className="field">
-              <span>Message</span>
-              <textarea
-                value={input}
-                onChange={(event) => setInput(event.target.value)}
-                placeholder="Ask the agent to use the connected MCP tools..."
-                rows={4}
-              />
-            </label>
-
-            {error ? <p className="error-banner">{error}</p> : null}
-
-            <div className="form-actions">
-              <button
-                className="primary-button"
-                type="button"
-                disabled={isSending || readyServers.length === 0}
-                onClick={() => void handleSend()}
-              >
-                {isSending ? 'Streaming...' : 'Send'}
-              </button>
-            </div>
-          </div>
-        </article>
+        </div>
       </section>
     </div>
   )
-}
-
-function serializeServerForAgent(server: ServerRecord) {
-  return {
-    id: server.id,
-    name: server.name,
-    endpoint: server.endpoint,
-    authType: server.authType,
-    bearerToken: server.bearerToken,
-    headerName: server.headerName,
-    headerValue: server.headerValue,
-    inspectResult: server.inspectResult,
-  }
 }

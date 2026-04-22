@@ -559,10 +559,15 @@
   overflow: auto;
 }
 
+.agent-chat-card {
+  min-height: calc(100vh - 13rem);
+}
+
 .chat-log {
   display: grid;
   gap: 1rem;
-  max-height: 520px;
+  min-height: 24rem;
+  max-height: 62vh;
   overflow-y: auto;
   padding-right: 0.25rem;
 }

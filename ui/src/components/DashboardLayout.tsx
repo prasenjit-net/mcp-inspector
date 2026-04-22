@@ -11,38 +11,30 @@ export function DashboardLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const location = useLocation()
-  const { health, healthError, theme, toggleTheme, servers } = useAppState()
+  const { health, healthError, theme, toggleTheme } = useAppState()
 
   const breadcrumbs = useMemo(() => {
     const segments = location.pathname.split('/').filter(Boolean)
     if (segments.length === 0 || segments[0] === 'servers') {
       const items = [{ label: 'Servers', to: '/servers' }]
-      const server = segments[1] ? servers.find((entry) => entry.id === segments[1]) : undefined
 
-      if (server) {
-        items.push({ label: server.name, to: `/servers/${server.id}` })
+      if (segments[1]) {
+        items.push({ label: 'Details', to: location.pathname })
       }
 
-      if (segments[2] === 'tools' && segments[3] && server?.inspectResult) {
-        const tool = server.inspectResult.tools.find((entry) => entry.name === decodeURIComponent(segments[3]))
-        items.push({
-          label: tool?.displayName ?? decodeURIComponent(segments[3]),
-          to: location.pathname,
-        })
+      if (segments[2] === 'tools' && segments[3]) {
+        items.push({ label: 'Tool', to: location.pathname })
       }
 
       if (segments[2] === 'resources' && segments[3]) {
-        items.push({
-          label: decodeURIComponent(segments[3]),
-          to: location.pathname,
-        })
+        items.push({ label: 'Resource', to: location.pathname })
       }
 
       return items
     }
 
     return [{ label: 'Agent', to: '/agent' }]
-  }, [location.pathname, servers])
+  }, [location.pathname])
 
   const currentPageTitle = breadcrumbs[breadcrumbs.length - 1]?.label ?? 'Servers'
 

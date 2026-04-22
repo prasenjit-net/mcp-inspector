@@ -22,7 +22,10 @@ func main() {
 		log.Fatal(err)
 	}
 
-	app := newApplication(config)
+	app, err := newApplication(config)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	addr := os.Getenv("ADDR")
 	if addr == "" {
@@ -30,9 +33,16 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/health", handleHealth)
-	mux.HandleFunc("/api/inspect", handleInspect)
-	mux.HandleFunc("/api/agent/chat", app.handleAgentChat)
+	mux.HandleFunc("GET /api/health", handleHealth)
+	mux.HandleFunc("GET /api/servers", app.handleListServers)
+	mux.HandleFunc("POST /api/servers", app.handleCreateServer)
+	mux.HandleFunc("GET /api/servers/{id}", app.handleGetServer)
+	mux.HandleFunc("POST /api/servers/{id}/reinspect", app.handleReinspectServer)
+	mux.HandleFunc("GET /api/servers/{id}/tools", app.handleListServerTools)
+	mux.HandleFunc("GET /api/servers/{id}/tools/{toolName}", app.handleGetServerTool)
+	mux.HandleFunc("GET /api/servers/{id}/resources", app.handleListServerResources)
+	mux.HandleFunc("GET /api/servers/{id}/resources/{resourceID}", app.handleGetServerResource)
+	mux.HandleFunc("POST /api/agent/chat", app.handleAgentChat)
 	mux.Handle("/", uiHandler())
 
 	server := &http.Server{

@@ -1,19 +1,60 @@
+import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { getServer, getTool } from '../lib/api'
 import { formatJSON, extractSchemaFields } from '../lib/schema'
-import { useAppState } from '../state/useAppState'
+import type { ServerDetail, ToolDetail } from '../types'
 
 export function ToolDetailPage() {
   const { serverId, toolName } = useParams()
-  const { getServerById } = useAppState()
-  const server = serverId ? getServerById(serverId) : undefined
-  const tool = server?.inspectResult?.tools.find((entry) => entry.name === toolName)
+  const [server, setServer] = useState<ServerDetail | null>(null)
+  const [tool, setTool] = useState<ToolDetail | null>(null)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (!serverId || !toolName) {
+      return
+    }
+
+    const controller = new AbortController()
+
+    void (async () => {
+      try {
+        const [serverPayload, toolPayload] = await Promise.all([
+          getServer(serverId, controller.signal),
+          getTool(serverId, toolName, controller.signal),
+        ])
+        setServer(serverPayload)
+        setTool(toolPayload)
+        setError('')
+      } catch (loadError) {
+        if (controller.signal.aborted) {
+          return
+        }
+        setError(loadError instanceof Error ? loadError.message : 'unable to load tool')
+      }
+    })()
+
+    return () => controller.abort()
+  }, [serverId, toolName])
+
+  if (!serverId || !toolName) {
+    return (
+      <section className="card empty-state">
+        <h2 className="section-title">Tool not found</h2>
+        <p>This route is missing the selected tool identifier.</p>
+        <Link className="primary-button" to={serverId ? `/servers/${serverId}` : '/servers'}>
+          Back
+        </Link>
+      </section>
+    )
+  }
 
   if (!server || !tool) {
     return (
       <section className="card empty-state">
         <h2 className="section-title">Tool not found</h2>
-        <p>The requested tool is not available in the selected server catalog.</p>
-        <Link className="primary-button" to={server ? `/servers/${server.id}` : '/servers'}>
+        <p>{error || 'The requested tool is not available in the backend catalog.'}</p>
+        <Link className="primary-button" to={serverId ? `/servers/${serverId}` : '/servers'}>
           Back
         </Link>
       </section>
@@ -27,10 +68,23 @@ export function ToolDetailPage() {
     <div className="page-stack">
       <section className="page-intro">
         <div>
+          <div className="breadcrumb-row" aria-label="Breadcrumb">
+            <Link className="breadcrumb-link" to="/servers">
+              Servers
+            </Link>
+            <span className="breadcrumb-separator">/</span>
+            <Link className="breadcrumb-link" to={`/servers/${server.id}`}>
+              {server.name}
+            </Link>
+            <span className="breadcrumb-separator">/</span>
+            <span>{tool.displayName}</span>
+          </div>
           <h2 className="section-title">{tool.displayName}</h2>
           <p className="section-copy">{tool.description || 'No tool description provided.'}</p>
         </div>
       </section>
+
+      {error ? <p className="error-banner">{error}</p> : null}
 
       <section className="content-grid">
         <article className="card">

@@ -16,9 +16,23 @@ build:
 	GO_PACKAGES=$$(go list ./... | grep -v '/ui/'); go build $$GO_PACKAGES
 
 run:
-	cd ui && npm ci && npm run build
-	go build -o mcp-inspector .
-	./mcp-inspector
+	@RUN_ADDR="$${ADDR}"; \
+	if [ -z "$$RUN_ADDR" ]; then \
+		if [ -f config.toml ]; then \
+			RUN_PORT="$$(awk -F= '/^[[:space:]]*app_port[[:space:]]*=/{gsub(/[[:space:]]/, "", $$2); print $$2; exit}' config.toml)"; \
+		elif [ -f config.example.toml ]; then \
+			RUN_PORT="$$(awk -F= '/^[[:space:]]*app_port[[:space:]]*=/{gsub(/[[:space:]]/, "", $$2); print $$2; exit}' config.example.toml)"; \
+		fi; \
+		if [ -z "$$RUN_PORT" ]; then RUN_PORT=8080; fi; \
+		RUN_ADDR=":$$RUN_PORT"; \
+	fi; \
+	RUN_PORT="$${RUN_ADDR##*:}"; \
+	if lsof -nP -iTCP:"$$RUN_PORT" -sTCP:LISTEN >/dev/null 2>&1; then \
+		echo "Port $$RUN_PORT is already in use; stop the existing listener or run with ADDR=:<port> make run."; \
+		exit 1; \
+	fi; \
+	(cd ui && npm ci && npm run build) && \
+	go build -o mcp-inspector . && ADDR="$$RUN_ADDR" ./mcp-inspector
 
 test:
 	cd ui && npm ci && npm run build

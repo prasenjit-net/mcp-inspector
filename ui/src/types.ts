@@ -6,7 +6,6 @@ export type HealthResponse = {
 
 export type ToolDefinition = {
   name: string
-  title?: string
   displayName: string
   description?: string
   annotations?: {
@@ -28,46 +27,55 @@ export type ResourceDefinition = {
   mimeType?: string
 }
 
-export type InspectResponse = {
-  url: string
-  transport: string
-  protocolVersion?: string
-  instructions?: string
-  server: {
-    name?: string
-    version?: string
-  }
-  tools: ToolDefinition[]
-  resources?: ResourceDefinition[]
-}
-
 export type AuthType = 'none' | 'bearer' | 'header'
 export type ThemeMode = 'dark' | 'light'
 export type ServerStatus = 'ready' | 'error' | 'pending'
 
-export type InspectFormState = {
+export type ServerSummary = {
+  id: string
   name: string
-  serverURL: string
-  authType: AuthType
-  bearerToken: string
-  headerName: string
-  headerValue: string
+  endpoint: string
+  status: ServerStatus
+  lastInspectedAt?: string
+  lastError?: string
+  transport?: string
+  toolCount: number
+  resourceCount: number
 }
 
-export type ServerRecord = {
-  id: string
+export type ServerDetail = ServerSummary & {
+  serverName?: string
+  serverVersion?: string
+  protocolVersion?: string
+  instructions?: string
+  tools: ToolSummary[]
+  resources: ResourceDefinition[]
+}
+
+export type ToolSummary = {
+  name: string
+  displayName: string
+  description?: string
+  inputFieldCount: number
+  outputFieldCount: number
+  annotations?: ToolDefinition['annotations']
+}
+
+export type ToolDetail = ToolDefinition & {
+  serverId: string
+}
+
+export type ResourceDetail = ResourceDefinition & {
+  serverId: string
+}
+
+export type CreateServerFormState = {
   name: string
   endpoint: string
   authType: AuthType
   bearerToken: string
   headerName: string
   headerValue: string
-  status: ServerStatus
-  createdAt: string
-  updatedAt: string
-  lastInspectedAt?: string
-  lastError?: string
-  inspectResult?: InspectResponse
 }
 
 export type SchemaObject = {

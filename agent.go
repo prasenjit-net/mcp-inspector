@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -20,12 +19,14 @@ import (
 )
 
 type application struct {
-	config appConfig
-	agent  *agentService
+	config  appConfig
+	servers *serverService
+	agent   *agentService
 }
 
 type agentService struct {
 	config   appConfig
+	servers  *serverService
 	client   *http.Client
 	mu       sync.Mutex
 	sessions map[string]*agentSession
@@ -35,24 +36,11 @@ type agentSession struct {
 	ID       string
 	mu       sync.Mutex
 	Messages []openAIChatMessage
-	Servers  []agentServer
 }
 
 type agentChatRequest struct {
-	SessionID string        `json:"sessionId,omitempty"`
-	Message   string        `json:"message"`
-	Servers   []agentServer `json:"servers"`
-}
-
-type agentServer struct {
-	ID            string           `json:"id"`
-	Name          string           `json:"name"`
-	Endpoint      string           `json:"endpoint"`
-	AuthType      string           `json:"authType,omitempty"`
-	BearerToken   string           `json:"bearerToken,omitempty"`
-	HeaderName    string           `json:"headerName,omitempty"`
-	HeaderValue   string           `json:"headerValue,omitempty"`
-	InspectResult *inspectResponse `json:"inspectResult,omitempty"`
+	SessionID string `json:"sessionId,omitempty"`
+	Message   string `json:"message"`
 }
 
 type openAIChatRequest struct {
@@ -100,21 +88,28 @@ type openAIChatResponse struct {
 
 type agentToolBinding struct {
 	OpenAIName string
-	Server     agentServer
+	Server     storedServer
 	Tool       inspectTool
 }
 
-func newApplication(config appConfig) *application {
+func newApplication(config appConfig) (*application, error) {
+	store, err := newDataStore(dataFilePath)
+	if err != nil {
+		return nil, err
+	}
+	servers := newServerService(store)
 	return &application{
-		config: config,
+		config:  config,
+		servers: servers,
 		agent: &agentService{
-			config: config,
+			config:  config,
+			servers: servers,
 			client: &http.Client{
 				Timeout: 60 * time.Second,
 			},
 			sessions: make(map[string]*agentSession),
 		},
-	}
+	}, nil
 }
 
 func (a *application) handleAgentChat(w http.ResponseWriter, r *http.Request) {
@@ -147,20 +142,12 @@ func (a *application) handleAgentChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	servers, err := normalizeAgentServers(request.Servers)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, apiError{Error: err.Error()})
-		return
-	}
-	if len(servers) == 0 {
-		writeJSON(w, http.StatusBadRequest, apiError{Error: "at least one inspected server is required"})
+	if len(a.servers.listReadyServers()) == 0 {
+		writeJSON(w, http.StatusBadRequest, apiError{Error: "inspect at least one server before using the agent"})
 		return
 	}
 
-	session := a.agent.getOrCreateSession(request.SessionID, servers)
-	session.mu.Lock()
-	session.Servers = servers
-	session.mu.Unlock()
+	session := a.agent.getOrCreateSession(request.SessionID)
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -180,7 +167,7 @@ func (a *application) handleAgentChat(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *agentService) getOrCreateSession(id string, servers []agentServer) *agentSession {
+func (s *agentService) getOrCreateSession(id string) *agentSession {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -191,8 +178,7 @@ func (s *agentService) getOrCreateSession(id string, servers []agentServer) *age
 	}
 
 	session := &agentSession{
-		ID:      newSessionID(),
-		Servers: servers,
+		ID: newSessionID(),
 	}
 	s.sessions[session.ID] = session
 	return session
@@ -202,15 +188,16 @@ func (s *agentService) runChat(ctx context.Context, session *agentSession, userM
 	session.mu.Lock()
 	defer session.mu.Unlock()
 
-	bindings, tools := buildOpenAITools(session.Servers)
+	servers := s.servers.listReadyServers()
+	bindings, tools := buildOpenAITools(servers)
 	if len(tools) == 0 {
-		return errors.New("no inspected tools are available across the connected servers")
+		return errors.New("no inspected tools are available across the saved servers")
 	}
 
 	messages := make([]openAIChatMessage, 0, len(session.Messages)+4)
 	messages = append(messages, openAIChatMessage{
 		Role:    "system",
-		Content: buildSystemPrompt(session.Servers),
+		Content: buildSystemPrompt(servers),
 	})
 	messages = append(messages, session.Messages...)
 	persistFrom := len(messages) - 1
@@ -317,7 +304,7 @@ func (s *agentService) complete(ctx context.Context, messages []openAIChatMessag
 	return &parsed, nil
 }
 
-func buildOpenAITools(servers []agentServer) (map[string]agentToolBinding, []openAITool) {
+func buildOpenAITools(servers []storedServer) (map[string]agentToolBinding, []openAITool) {
 	bindings := make(map[string]agentToolBinding)
 	tools := make([]openAITool, 0)
 	usedNames := make(map[string]int)
@@ -365,7 +352,7 @@ func buildOpenAITools(servers []agentServer) (map[string]agentToolBinding, []ope
 	return bindings, tools
 }
 
-func buildSystemPrompt(servers []agentServer) string {
+func buildSystemPrompt(servers []storedServer) string {
 	var builder strings.Builder
 	builder.WriteString("You are MCP Inspector Agent. You help the user by using MCP tools exposed by the connected servers when useful. Prefer using tools when they can answer the question reliably. Keep answers concise and grounded in tool results.\n\nConnected servers:\n")
 
@@ -385,18 +372,8 @@ func buildSystemPrompt(servers []agentServer) string {
 	return builder.String()
 }
 
-func callRemoteTool(ctx context.Context, server agentServer, toolName, rawArguments string) (string, error) {
-	auth, err := normalizeInspectAuth(&inspectAuth{
-		Type:        server.AuthType,
-		Token:       server.BearerToken,
-		HeaderName:  server.HeaderName,
-		HeaderValue: server.HeaderValue,
-	})
-	if err != nil {
-		return "", err
-	}
-
-	session, _, err := connectMCP(ctx, server.Endpoint, auth, preferredTransport(server))
+func callRemoteTool(ctx context.Context, server storedServer, toolName, rawArguments string) (string, error) {
+	session, _, err := connectMCP(ctx, server.Endpoint, &server.Auth, preferredTransport(server))
 	if err != nil {
 		return "", err
 	}
@@ -420,7 +397,7 @@ func callRemoteTool(ctx context.Context, server agentServer, toolName, rawArgume
 	return formatToolResult(result), nil
 }
 
-func preferredTransport(server agentServer) string {
+func preferredTransport(server storedServer) string {
 	if server.InspectResult == nil {
 		return ""
 	}
@@ -464,43 +441,6 @@ func formatToolResult(result *mcp.CallToolResult) string {
 	return strings.Join(parts, "\n")
 }
 
-func normalizeAgentServers(servers []agentServer) ([]agentServer, error) {
-	normalized := make([]agentServer, 0, len(servers))
-
-	for _, server := range servers {
-		endpoint, err := normalizeEndpoint(server.Endpoint)
-		if err != nil {
-			return nil, err
-		}
-
-		auth, err := normalizeInspectAuth(&inspectAuth{
-			Type:        server.AuthType,
-			Token:       server.BearerToken,
-			HeaderName:  server.HeaderName,
-			HeaderValue: server.HeaderValue,
-		})
-		if err != nil {
-			return nil, err
-		}
-
-		name := strings.TrimSpace(server.Name)
-		if name == "" {
-			name = inferServerNameFromURL(endpoint)
-		}
-
-		copyServer := server
-		copyServer.Name = name
-		copyServer.Endpoint = endpoint
-		copyServer.AuthType = auth.Type
-		copyServer.BearerToken = auth.Token
-		copyServer.HeaderName = auth.HeaderName
-		copyServer.HeaderValue = auth.HeaderValue
-		normalized = append(normalized, copyServer)
-	}
-
-	return normalized, nil
-}
-
 func sanitizeToolName(value string) string {
 	value = strings.ToLower(value)
 	var builder strings.Builder
@@ -527,14 +467,6 @@ func truncateForEvent(value string, limit int) string {
 		return value
 	}
 	return value[:limit] + "..."
-}
-
-func inferServerNameFromURL(raw string) string {
-	parsed, err := url.Parse(raw)
-	if err != nil || parsed.Hostname() == "" {
-		return "MCP server"
-	}
-	return parsed.Hostname()
 }
 
 func newSessionID() string {

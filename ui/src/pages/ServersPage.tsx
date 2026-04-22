@@ -1,31 +1,74 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useAppState } from '../state/useAppState'
-import type { ServerRecord, ServerStatus } from '../types'
+import { createServer, listServers } from '../lib/api'
+import type { CreateServerFormState, ServerStatus, ServerSummary } from '../types'
+
+const initialDraftServer: CreateServerFormState = {
+  name: '',
+  endpoint: 'http://localhost:8000',
+  authType: 'none',
+  bearerToken: '',
+  headerName: '',
+  headerValue: '',
+}
 
 export function ServersPage() {
   const navigate = useNavigate()
-  const {
-    servers,
-    draftServer,
-    updateDraftServer,
-    createServer,
-    createServerError,
-    isCreatingServer,
-  } = useAppState()
+  const [servers, setServers] = useState<ServerSummary[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [draftServer, setDraftServer] = useState<CreateServerFormState>(initialDraftServer)
+  const [isCreatingServer, setIsCreatingServer] = useState(false)
+  const [createServerError, setCreateServerError] = useState('')
+
+  useEffect(() => {
+    const controller = new AbortController()
+
+    void (async () => {
+      try {
+        const payload = await listServers(controller.signal)
+        setServers(payload.servers)
+        setLoadError('')
+      } catch (error) {
+        if (controller.signal.aborted) {
+          return
+        }
+        setLoadError(error instanceof Error ? error.message : 'unable to load servers')
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsLoading(false)
+        }
+      }
+    })()
+
+    return () => controller.abort()
+  }, [])
 
   const sortedServers = useMemo(
-    () => [...servers].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
+    () =>
+      [...servers].sort((left, right) =>
+        (right.lastInspectedAt || '').localeCompare(left.lastInspectedAt || ''),
+      ),
     [servers],
   )
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const serverId = await createServer()
-    if (serverId) {
+    setIsCreatingServer(true)
+    setCreateServerError('')
+
+    try {
+      const server = await createServer(draftServer)
+      setDraftServer(initialDraftServer)
       setIsModalOpen(false)
-      navigate(`/servers/${serverId}`)
+      navigate(`/servers/${server.id}`)
+    } catch (error) {
+      setCreateServerError(
+        error instanceof Error ? error.message : 'unable to create the server',
+      )
+    } finally {
+      setIsCreatingServer(false)
     }
   }
 
@@ -34,7 +77,10 @@ export function ServersPage() {
       <section className="page-intro">
         <div>
           <h2 className="section-title">Servers</h2>
-          <p className="section-copy">Add MCP endpoints, monitor inspection status, and drill into tools or resources from a single workspace.</p>
+          <p className="section-copy">
+            Add MCP endpoints, inspect them on the backend, and open only sanitized tool
+            and resource details in the dashboard.
+          </p>
         </div>
 
         <button className="primary-button" type="button" onClick={() => setIsModalOpen(true)}>
@@ -42,7 +88,14 @@ export function ServersPage() {
         </button>
       </section>
 
-      {sortedServers.length === 0 ? (
+      {loadError ? <p className="error-banner">{loadError}</p> : null}
+
+      {isLoading ? (
+        <section className="card empty-state">
+          <h3>Loading servers</h3>
+          <p>Fetching backend-managed server summaries.</p>
+        </section>
+      ) : sortedServers.length === 0 ? (
         <section className="card empty-state">
           <h3>No servers yet</h3>
           <p>Add your first MCP server to start inspecting tools and metadata.</p>
@@ -71,7 +124,7 @@ export function ServersPage() {
             <div className="section-heading">
               <div>
                 <h3 id="add-server-title">Add Server</h3>
-                <p>Save a server entry and inspect it immediately.</p>
+                <p>Send credentials once, store them server-side, and inspect immediately.</p>
               </div>
             </div>
 
@@ -82,7 +135,9 @@ export function ServersPage() {
                   <input
                     type="text"
                     value={draftServer.name}
-                    onChange={(event) => updateDraftServer({ name: event.target.value })}
+                    onChange={(event) =>
+                      setDraftServer((current) => ({ ...current, name: event.target.value }))
+                    }
                     placeholder="Production MCP"
                   />
                 </label>
@@ -91,8 +146,13 @@ export function ServersPage() {
                   <span>Endpoint</span>
                   <input
                     type="url"
-                    value={draftServer.serverURL}
-                    onChange={(event) => updateDraftServer({ serverURL: event.target.value })}
+                    value={draftServer.endpoint}
+                    onChange={(event) =>
+                      setDraftServer((current) => ({
+                        ...current,
+                        endpoint: event.target.value,
+                      }))
+                    }
                     placeholder="https://example.com/mcp"
                   />
                 </label>
@@ -102,9 +162,10 @@ export function ServersPage() {
                   <select
                     value={draftServer.authType}
                     onChange={(event) =>
-                      updateDraftServer({
-                        authType: event.target.value as typeof draftServer.authType,
-                      })
+                      setDraftServer((current) => ({
+                        ...current,
+                        authType: event.target.value as CreateServerFormState['authType'],
+                      }))
                     }
                   >
                     <option value="none">None</option>
@@ -119,7 +180,12 @@ export function ServersPage() {
                     <input
                       type="password"
                       value={draftServer.bearerToken}
-                      onChange={(event) => updateDraftServer({ bearerToken: event.target.value })}
+                      onChange={(event) =>
+                        setDraftServer((current) => ({
+                          ...current,
+                          bearerToken: event.target.value,
+                        }))
+                      }
                       placeholder="sk-..."
                     />
                   </label>
@@ -132,7 +198,12 @@ export function ServersPage() {
                       <input
                         type="text"
                         value={draftServer.headerName}
-                        onChange={(event) => updateDraftServer({ headerName: event.target.value })}
+                        onChange={(event) =>
+                          setDraftServer((current) => ({
+                            ...current,
+                            headerName: event.target.value,
+                          }))
+                        }
                         placeholder="X-API-Key"
                       />
                     </label>
@@ -142,7 +213,12 @@ export function ServersPage() {
                       <input
                         type="password"
                         value={draftServer.headerValue}
-                        onChange={(event) => updateDraftServer({ headerValue: event.target.value })}
+                        onChange={(event) =>
+                          setDraftServer((current) => ({
+                            ...current,
+                            headerValue: event.target.value,
+                          }))
+                        }
                         placeholder="secret value"
                       />
                     </label>
@@ -154,7 +230,7 @@ export function ServersPage() {
 
               <div className="form-actions">
                 <button className="primary-button" type="submit" disabled={isCreatingServer}>
-                  {isCreatingServer ? 'Inspecting...' : 'Save and inspect'}
+                  {isCreatingServer ? 'Saving...' : 'Save and inspect'}
                 </button>
                 <button
                   className="secondary-button"
@@ -172,10 +248,7 @@ export function ServersPage() {
   )
 }
 
-function ServerCard({ server }: { server: ServerRecord }) {
-  const toolCount = server.inspectResult?.tools.length ?? 0
-  const resourceCount = server.inspectResult?.resources?.length ?? 0
-
+function ServerCard({ server }: { server: ServerSummary }) {
   return (
     <Link className="card server-card" to={`/servers/${server.id}`}>
       <div className="server-card-header">
@@ -189,15 +262,15 @@ function ServerCard({ server }: { server: ServerRecord }) {
       <div className="server-card-metrics">
         <div>
           <span className="summary-label">Tools</span>
-          <strong>{toolCount}</strong>
+          <strong>{server.toolCount}</strong>
         </div>
         <div>
           <span className="summary-label">Resources</span>
-          <strong>{resourceCount}</strong>
+          <strong>{server.resourceCount}</strong>
         </div>
         <div>
           <span className="summary-label">Transport</span>
-          <strong>{server.inspectResult?.transport || 'Unknown'}</strong>
+          <strong>{server.transport || 'Unknown'}</strong>
         </div>
       </div>
 

@@ -1,16 +1,47 @@
+import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { useAppState } from '../state/useAppState'
+import { getServer, reinspectServer } from '../lib/api'
+import type { ServerDetail } from '../types'
 
 export function ServerDetailPage() {
   const { serverId } = useParams()
-  const { getServerById, reinspectServer } = useAppState()
-  const server = serverId ? getServerById(serverId) : undefined
+  const [server, setServer] = useState<ServerDetail | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [isReinspecting, setIsReinspecting] = useState(false)
 
-  if (!server) {
+  useEffect(() => {
+    if (!serverId) {
+      return
+    }
+
+    const controller = new AbortController()
+
+    void (async () => {
+      try {
+        const payload = await getServer(serverId, controller.signal)
+        setServer(payload)
+        setError('')
+      } catch (loadError) {
+        if (controller.signal.aborted) {
+          return
+        }
+        setError(loadError instanceof Error ? loadError.message : 'unable to load server')
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsLoading(false)
+        }
+      }
+    })()
+
+    return () => controller.abort()
+  }, [serverId])
+
+  if (!serverId) {
     return (
       <section className="card empty-state">
         <h2 className="section-title">Server not found</h2>
-        <p>This server entry no longer exists in the local workspace.</p>
+        <p>This route is missing the selected server identifier.</p>
         <Link className="primary-button" to="/servers">
           Back to Servers
         </Link>
@@ -18,13 +49,55 @@ export function ServerDetailPage() {
     )
   }
 
-  const toolCount = server.inspectResult?.tools.length ?? 0
-  const resourceCount = server.inspectResult?.resources?.length ?? 0
+  async function handleReinspect() {
+    if (!serverId) {
+      return
+    }
+
+    setIsReinspecting(true)
+    try {
+      const payload = await reinspectServer(serverId)
+      setServer(payload)
+      setError('')
+    } catch (reinspectError) {
+      setError(reinspectError instanceof Error ? reinspectError.message : 'unable to reinspect')
+    } finally {
+      setIsReinspecting(false)
+    }
+  }
+
+  if (isLoading) {
+    return (
+      <section className="card empty-state">
+        <h2 className="section-title">Loading server</h2>
+        <p>Fetching backend-owned inspection details.</p>
+      </section>
+    )
+  }
+
+  if (!server) {
+    return (
+      <section className="card empty-state">
+        <h2 className="section-title">Server not found</h2>
+        <p>{error || 'This server entry no longer exists in the backend data store.'}</p>
+        <Link className="primary-button" to="/servers">
+          Back to Servers
+        </Link>
+      </section>
+    )
+  }
 
   return (
     <div className="page-stack">
       <section className="page-intro">
         <div>
+          <div className="breadcrumb-row" aria-label="Breadcrumb">
+            <Link className="breadcrumb-link" to="/servers">
+              Servers
+            </Link>
+            <span className="breadcrumb-separator">/</span>
+            <span>{server.name}</span>
+          </div>
           <h2 className="section-title">{server.name}</h2>
           <p className="section-copy">{server.endpoint}</p>
         </div>
@@ -33,12 +106,15 @@ export function ServerDetailPage() {
           <button
             className="secondary-button"
             type="button"
-            onClick={() => void reinspectServer(server.id)}
+            onClick={() => void handleReinspect()}
+            disabled={isReinspecting}
           >
-            Reinspect
+            {isReinspecting ? 'Inspecting...' : 'Reinspect'}
           </button>
         </div>
       </section>
+
+      {error ? <p className="error-banner">{error}</p> : null}
 
       <section className="summary-grid">
         <article className="card summary-card">
@@ -48,13 +124,13 @@ export function ServerDetailPage() {
         </article>
         <article className="card summary-card">
           <span className="summary-label">Tools</span>
-          <strong>{toolCount}</strong>
-          <p>Tool definitions discovered from the latest inspection.</p>
+          <strong>{server.toolCount}</strong>
+          <p>Sanitized tool definitions from the latest backend inspection.</p>
         </article>
         <article className="card summary-card">
           <span className="summary-label">Resources</span>
-          <strong>{resourceCount}</strong>
-          <p>Resource inventory will populate here when resource inspection is available.</p>
+          <strong>{server.resourceCount}</strong>
+          <p>Available resource entries discovered during inspection.</p>
         </article>
       </section>
 
@@ -70,7 +146,7 @@ export function ServerDetailPage() {
           <dl className="meta-list">
             <div>
               <dt>Name</dt>
-              <dd>{server.inspectResult?.server.name || server.name}</dd>
+              <dd>{server.serverName || server.name}</dd>
             </div>
             <div>
               <dt>Endpoint</dt>
@@ -78,19 +154,19 @@ export function ServerDetailPage() {
             </div>
             <div>
               <dt>Protocol</dt>
-              <dd>{server.inspectResult?.protocolVersion || 'Unknown'}</dd>
+              <dd>{server.protocolVersion || 'Unknown'}</dd>
             </div>
             <div>
               <dt>Transport</dt>
-              <dd>{server.inspectResult?.transport || 'Unknown'}</dd>
+              <dd>{server.transport || 'Unknown'}</dd>
             </div>
             <div>
               <dt>Server version</dt>
-              <dd>{server.inspectResult?.server.version || 'Unknown'}</dd>
+              <dd>{server.serverVersion || 'Unknown'}</dd>
             </div>
             <div>
-              <dt>Authorization</dt>
-              <dd>{server.authType === 'none' ? 'None' : server.authType === 'bearer' ? 'Bearer token' : 'Custom header'}</dd>
+              <dt>Last inspected</dt>
+              <dd>{server.lastInspectedAt || 'Not inspected yet'}</dd>
             </div>
           </dl>
         </article>
@@ -103,7 +179,7 @@ export function ServerDetailPage() {
             </div>
           </div>
 
-          <p>{server.inspectResult?.instructions || 'No server instructions were provided.'}</p>
+          <p>{server.instructions || 'No server instructions were provided.'}</p>
         </article>
       </section>
 
@@ -114,9 +190,9 @@ export function ServerDetailPage() {
         </div>
       </section>
 
-      {toolCount > 0 ? (
+      {server.tools.length > 0 ? (
         <section className="server-grid">
-          {server.inspectResult?.tools.map((tool) => (
+          {server.tools.map((tool) => (
             <Link
               key={tool.name}
               className="card tool-summary-card"
@@ -143,14 +219,35 @@ export function ServerDetailPage() {
       <section className="section-heading">
         <div>
           <h3>Resources</h3>
-          <p>Resource pages will appear here once the backend returns resource metadata.</p>
+          <p>Dedicated pages for discovered resources.</p>
         </div>
       </section>
 
-      <section className="card empty-state">
-        <h3>No resources available</h3>
-        <p>The current backend inspection flow is focused on tools first.</p>
-      </section>
+      {server.resources.length > 0 ? (
+        <section className="server-grid">
+          {server.resources.map((resource) => (
+            <Link
+              key={resource.id}
+              className="card tool-summary-card"
+              to={`/servers/${server.id}/resources/${encodeURIComponent(resource.id)}`}
+            >
+              <div className="server-card-header">
+                <div>
+                  <h3>{resource.name}</h3>
+                  <p className="server-card-endpoint">{resource.uri || resource.id}</p>
+                </div>
+              </div>
+              <p>{resource.description || 'No description provided.'}</p>
+              <span className="server-card-link">View details</span>
+            </Link>
+          ))}
+        </section>
+      ) : (
+        <section className="card empty-state">
+          <h3>No resources available</h3>
+          <p>The latest inspection did not return any resources.</p>
+        </section>
+      )}
     </div>
   )
 }

@@ -1,5 +1,11 @@
 .idea/
+.DS_Store
 config.toml
+data.json
 dist/
+mcp-inspector
+*.log
+*.out
+*.tmp
 ui/dist/
 ui/node_modules/
