@@ -43,7 +43,7 @@ func loadConfig() (appConfig, error) {
 	}
 
 	if config.AppPort == 0 {
-		config.AppPort = 8080
+		config.AppPort = 4827
 	}
 	if config.OpenAI.Model == "" {
 		config.OpenAI.Model = "gpt-4.1-mini"
@@ -64,7 +64,7 @@ func mergeConfigFile(path string, config *appConfig) error {
 
 func defaultAppConfig() appConfig {
 	return appConfig{
-		AppPort: 8080,
+		AppPort: 4827,
 		OpenAI: openAIConfig{
 			Model:   "gpt-4.1-mini",
 			BaseURL: "https://api.openai.com/v1",

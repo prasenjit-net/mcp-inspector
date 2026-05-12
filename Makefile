@@ -23,7 +23,7 @@ run:
 		elif [ -f config.example.toml ]; then \
 			RUN_PORT="$$(awk -F= '/^[[:space:]]*app_port[[:space:]]*=/{gsub(/[[:space:]]/, "", $$2); print $$2; exit}' config.example.toml)"; \
 		fi; \
-		if [ -z "$$RUN_PORT" ]; then RUN_PORT=8080; fi; \
+		if [ -z "$$RUN_PORT" ]; then RUN_PORT=4827; fi; \
 		RUN_ADDR=":$$RUN_PORT"; \
 	fi; \
 	RUN_PORT="$${RUN_ADDR##*:}"; \

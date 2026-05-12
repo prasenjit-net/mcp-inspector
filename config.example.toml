@@ -1,4 +1,4 @@
-app_port = 8080
+app_port = 4827
 
 [openai]
 api_key = ""
