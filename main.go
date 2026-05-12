@@ -37,11 +37,13 @@ func main() {
 	mux.HandleFunc("GET /api/servers", app.handleListServers)
 	mux.HandleFunc("POST /api/servers", app.handleCreateServer)
 	mux.HandleFunc("GET /api/servers/{id}", app.handleGetServer)
+	mux.HandleFunc("DELETE /api/servers/{id}", app.handleDeleteServer)
 	mux.HandleFunc("POST /api/servers/{id}/reinspect", app.handleReinspectServer)
 	mux.HandleFunc("GET /api/servers/{id}/tools", app.handleListServerTools)
 	mux.HandleFunc("GET /api/servers/{id}/tools/{toolName}", app.handleGetServerTool)
 	mux.HandleFunc("GET /api/servers/{id}/resources", app.handleListServerResources)
 	mux.HandleFunc("GET /api/servers/{id}/resources/{resourceID}", app.handleGetServerResource)
+	mux.HandleFunc("POST /api/servers/{id}/resources/{resourceID}/content", app.handleReadServerResource)
 	mux.HandleFunc("POST /api/agent/chat", app.handleAgentChat)
 	mux.Handle("/", uiHandler())
 

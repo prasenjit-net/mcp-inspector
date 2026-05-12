@@ -45,6 +45,14 @@ func (a *application) handleGetServer(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, detail)
 }
 
+func (a *application) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
+	if err := a.servers.deleteServer(r.PathValue("id")); err != nil {
+		writeServerError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (a *application) handleReinspectServer(w http.ResponseWriter, r *http.Request) {
 	detail, err := a.servers.reinspectServer(r.Context(), r.PathValue("id"))
 	if err != nil {
@@ -99,6 +107,22 @@ func (a *application) handleGetServerResource(w http.ResponseWriter, r *http.Req
 		writeServerError(w, err)
 		return
 	}
+	writeJSON(w, http.StatusOK, resource)
+}
+
+func (a *application) handleReadServerResource(w http.ResponseWriter, r *http.Request) {
+	resourceID, err := url.PathUnescape(r.PathValue("resourceID"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, apiError{Error: "invalid resource id"})
+		return
+	}
+
+	resource, err := a.servers.readServerResource(r.Context(), r.PathValue("id"), resourceID)
+	if err != nil {
+		writeServerError(w, err)
+		return
+	}
+
 	writeJSON(w, http.StatusOK, resource)
 }
 

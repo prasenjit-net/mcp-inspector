@@ -1,20 +1,21 @@
-import { useEffect, useState } from 'react'
+import clsx from 'clsx'
+import { ArrowLeft, ChevronDown, Info, Workflow } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { getServer, getTool } from '../lib/api'
-import { formatJSON, extractSchemaFields } from '../lib/schema'
-import type { ServerDetail, ToolDetail } from '../types'
+import { extractSchemaFields, formatJSON } from '../lib/schema'
+import type { SchemaField, ServerDetail, ToolDetail } from '../types'
 
 export function ToolDetailPage() {
   const { serverId, toolName } = useParams()
   const [server, setServer] = useState<ServerDetail | null>(null)
   const [tool, setTool] = useState<ToolDetail | null>(null)
   const [error, setError] = useState('')
+  const [schemaTab, setSchemaTab] = useState<'input' | 'output'>('input')
+  const [showRaw, setShowRaw] = useState(false)
 
   useEffect(() => {
-    if (!serverId || !toolName) {
-      return
-    }
-
+    if (!serverId || !toolName) return
     const controller = new AbortController()
 
     void (async () => {
@@ -27,166 +28,136 @@ export function ToolDetailPage() {
         setTool(toolPayload)
         setError('')
       } catch (loadError) {
-        if (controller.signal.aborted) {
-          return
+        if (!controller.signal.aborted) {
+          setError(loadError instanceof Error ? loadError.message : 'Unable to load tool')
         }
-        setError(loadError instanceof Error ? loadError.message : 'unable to load tool')
       }
     })()
 
     return () => controller.abort()
   }, [serverId, toolName])
 
-  if (!serverId || !toolName) {
-    return (
-      <section className="card empty-state">
-        <h2 className="section-title">Tool not found</h2>
-        <p>This route is missing the selected tool identifier.</p>
-        <Link className="primary-button" to={serverId ? `/servers/${serverId}` : '/servers'}>
-          Back
-        </Link>
-      </section>
-    )
-  }
+  const inputFields = useMemo(() => extractSchemaFields(tool?.inputSchema), [tool?.inputSchema])
+  const outputFields = useMemo(() => extractSchemaFields(tool?.outputSchema), [tool?.outputSchema])
 
-  if (!server || !tool) {
+  if (!serverId || !toolName || !server || !tool) {
     return (
-      <section className="card empty-state">
-        <h2 className="section-title">Tool not found</h2>
+      <div className="empty-card">
+        <h3>Tool not found</h3>
         <p>{error || 'The requested tool is not available in the backend catalog.'}</p>
-        <Link className="primary-button" to={serverId ? `/servers/${serverId}` : '/servers'}>
+        <Link className="primary-action" to={serverId ? `/servers/${serverId}` : '/servers'}>
           Back
         </Link>
-      </section>
+      </div>
     )
   }
 
-  const inputFields = extractSchemaFields(tool.inputSchema)
-  const outputFields = extractSchemaFields(tool.outputSchema)
+  const fields = schemaTab === 'input' ? inputFields : outputFields
+  const rawSchema = schemaTab === 'input' ? tool.inputSchema : tool.outputSchema
 
   return (
-    <div className="page-stack">
-      <section className="page-intro">
+    <div className="page-container page-stack-lg">
+      <div className="page-header">
         <div>
-          <div className="breadcrumb-row" aria-label="Breadcrumb">
-            <Link className="breadcrumb-link" to="/servers">
-              Servers
-            </Link>
-            <span className="breadcrumb-separator">/</span>
-            <Link className="breadcrumb-link" to={`/servers/${server.id}`}>
-              {server.name}
-            </Link>
-            <span className="breadcrumb-separator">/</span>
+          <div className="breadcrumb-line">
+            <Link to="/servers">Servers</Link>
+            <span>/</span>
+            <Link to={`/servers/${server.id}`}>{server.name}</Link>
+            <span>/</span>
             <span>{tool.displayName}</span>
           </div>
-          <h2 className="section-title">{tool.displayName}</h2>
-          <p className="section-copy">{tool.description || 'No tool description provided.'}</p>
+          <h1 className="page-title">{tool.displayName}</h1>
+          <p className="page-subtitle">{tool.description || 'No tool description provided.'}</p>
         </div>
-      </section>
+        <div className="header-actions">
+          <Link className="secondary-action" to={`/servers/${server.id}`}>
+            <ArrowLeft className="button-icon" />
+            Back to Server
+          </Link>
+        </div>
+      </div>
 
-      {error ? <p className="error-banner">{error}</p> : null}
-
-      <section className="content-grid">
-        <article className="card">
-          <div className="section-heading">
-            <div>
-              <h3>Metadata</h3>
-              <p>Core tool properties and execution hints.</p>
-            </div>
-          </div>
-
-          <dl className="meta-list">
-            <div>
-              <dt>Name</dt>
-              <dd className="mono-block">{tool.name}</dd>
-            </div>
-            <div>
-              <dt>Display name</dt>
-              <dd>{tool.displayName}</dd>
-            </div>
-            <div>
-              <dt>Read only</dt>
-              <dd>{tool.annotations?.readOnlyHint ? 'Yes' : 'No'}</dd>
-            </div>
-            <div>
-              <dt>Idempotent</dt>
-              <dd>{tool.annotations?.idempotentHint ? 'Yes' : 'No'}</dd>
-            </div>
-            <div>
-              <dt>Open world</dt>
-              <dd>{tool.annotations?.openWorldHint ? 'Yes' : 'No'}</dd>
-            </div>
+      <div className="two-column-grid">
+        <section className="panel-card">
+          <h3 className="section-title"><Info className="section-title-icon" /> Metadata</h3>
+          <dl className="detail-list">
+            <DetailRow label="Name" value={tool.name} mono />
+            <DetailRow label="Display name" value={tool.displayName} />
+            <DetailRow label="Read only" value={tool.annotations?.readOnlyHint ? 'Yes' : 'No'} />
+            <DetailRow label="Idempotent" value={tool.annotations?.idempotentHint ? 'Yes' : 'No'} />
+            <DetailRow label="Open world" value={tool.annotations?.openWorldHint ? 'Yes' : 'No'} />
           </dl>
-        </article>
+        </section>
 
-        <article className="card">
-          <div className="section-heading">
-            <div>
-              <h3>Field summary</h3>
-              <p>Top-level schema fields extracted for quick review.</p>
+        <section className="panel-card">
+          <h3 className="section-title"><Workflow className="section-title-icon" /> Field summary</h3>
+          <div className="summary-kpi-grid">
+            <div className="summary-kpi">
+              <span className="meta-label">Input fields</span>
+              <strong>{inputFields.length}</strong>
+            </div>
+            <div className="summary-kpi">
+              <span className="meta-label">Output fields</span>
+              <strong>{outputFields.length}</strong>
             </div>
           </div>
+        </section>
+      </div>
 
-          <div className="tool-preview-list">
-            <div className="tool-preview-row">
-              <div>
-                <strong>Input fields</strong>
-                <p className="tool-preview-description">{inputFields.length} top-level fields</p>
-              </div>
-            </div>
-            <div className="tool-preview-row">
-              <div>
-                <strong>Output fields</strong>
-                <p className="tool-preview-description">{outputFields.length} top-level fields</p>
-              </div>
-            </div>
+      <section className="panel-card">
+        <div className="tabs-row">
+          <button className={schemaTab === 'input' ? 'tab-button tab-button-active' : 'tab-button'} type="button" onClick={() => setSchemaTab('input')}>
+            Input schema
+          </button>
+          <button className={schemaTab === 'output' ? 'tab-button tab-button-active' : 'tab-button'} type="button" onClick={() => setSchemaTab('output')}>
+            Output schema
+          </button>
+        </div>
+
+        {fields.length > 0 ? (
+          <div className="table-shell">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Field</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                  <th>Required</th>
+                </tr>
+              </thead>
+              <tbody>
+                {fields.map((field: SchemaField) => (
+                  <tr key={field.name}>
+                    <td>{field.name}</td>
+                    <td>{field.type}</td>
+                    <td>{field.description}</td>
+                    <td>{field.required ? 'Required' : 'Optional'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        </article>
-      </section>
+        ) : (
+          <div className="empty-card compact-empty">
+            <p>No top-level {schemaTab} fields were available.</p>
+          </div>
+        )}
 
-      <section className="schema-grid">
-        <article className="card schema-panel">
-          <h3>Input schema</h3>
-          {inputFields.length > 0 ? (
-            <div className="field-list">
-              {inputFields.map((field) => (
-                <div key={field.name} className="field-card">
-                  <div className="field-card-header">
-                    <strong>{field.name}</strong>
-                    <span>{field.type}</span>
-                  </div>
-                  <p>{field.description}</p>
-                  {field.required ? <span className="field-required">Required</span> : null}
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="schema-empty">No top-level input fields were available.</p>
-          )}
-          <pre className="schema-json">{formatJSON(tool.inputSchema)}</pre>
-        </article>
-
-        <article className="card schema-panel">
-          <h3>Output schema</h3>
-          {outputFields.length > 0 ? (
-            <div className="field-list">
-              {outputFields.map((field) => (
-                <div key={field.name} className="field-card">
-                  <div className="field-card-header">
-                    <strong>{field.name}</strong>
-                    <span>{field.type}</span>
-                  </div>
-                  <p>{field.description}</p>
-                  {field.required ? <span className="field-required">Required</span> : null}
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="schema-empty">No top-level output fields were available.</p>
-          )}
-          <pre className="schema-json">{formatJSON(tool.outputSchema)}</pre>
-        </article>
+        <button className="collapse-trigger" type="button" onClick={() => setShowRaw((current) => !current)}>
+          <ChevronDown className={clsx('button-icon', showRaw && 'rotate-180')} />
+          Raw schema JSON
+        </button>
+        {showRaw ? <pre className="code-block">{formatJSON(rawSchema)}</pre> : null}
       </section>
+    </div>
+  )
+}
+
+function DetailRow({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="detail-row">
+      <dt>{label}</dt>
+      <dd className={mono ? 'mono-text' : undefined}>{value}</dd>
     </div>
   )
 }

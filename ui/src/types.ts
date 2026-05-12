@@ -28,7 +28,7 @@ export type ResourceDefinition = {
 }
 
 export type AuthType = 'none' | 'bearer' | 'header'
-export type ThemeMode = 'dark' | 'light'
+export type ThemeMode = 'light' | 'dark' | 'system'
 export type ServerStatus = 'ready' | 'error' | 'pending'
 
 export type ServerSummary = {
@@ -67,6 +67,19 @@ export type ToolDetail = ToolDefinition & {
 
 export type ResourceDetail = ResourceDefinition & {
   serverId: string
+}
+
+export type ResourceContentPart = {
+  uri: string
+  mimeType?: string
+  text?: string
+  blob?: string
+}
+
+export type ResourceContentResponse = {
+  serverId: string
+  resource: ResourceDefinition
+  contents: ResourceContentPart[]
 }
 
 export type CreateServerFormState = {

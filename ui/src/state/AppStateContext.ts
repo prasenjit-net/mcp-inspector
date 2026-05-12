@@ -3,7 +3,7 @@ import type { HealthResponse, ThemeMode } from '../types'
 
 export type AppStateValue = {
   theme: ThemeMode
-  toggleTheme: () => void
+  setThemeMode: (theme: ThemeMode) => void
   health: HealthResponse | null
   healthError: string
 }

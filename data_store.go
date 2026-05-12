@@ -115,6 +115,20 @@ func (s *dataStore) replaceServer(server storedServer) error {
 	return os.ErrNotExist
 }
 
+func (s *dataStore) deleteServer(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for index, current := range s.data.Servers {
+		if current.ID == id {
+			s.data.Servers = append(s.data.Servers[:index], s.data.Servers[index+1:]...)
+			return s.persistLocked()
+		}
+	}
+
+	return os.ErrNotExist
+}
+
 func (s *dataStore) persistLocked() error {
 	data, err := json.MarshalIndent(s.data, "", "  ")
 	if err != nil {

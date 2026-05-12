@@ -10,8 +10,35 @@ export function AppStateProvider({ children }: PropsWithChildren) {
   const [healthError, setHealthError] = useState('')
 
   useEffect(() => {
-    document.documentElement.dataset.theme = theme
+    applyThemeMode(theme)
     localStorage.setItem(themeStorageKey, theme)
+  }, [theme])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const media = window.matchMedia('(prefers-color-scheme: dark)')
+    const handler = () => {
+      if (theme === 'system') {
+        applyThemeMode('system')
+      }
+    }
+
+    if (media.addEventListener) {
+      media.addEventListener('change', handler)
+    } else {
+      media.addListener(handler)
+    }
+
+    return () => {
+      if (media.removeEventListener) {
+        media.removeEventListener('change', handler)
+      } else {
+        media.removeListener(handler)
+      }
+    }
   }, [theme])
 
   useEffect(() => {
@@ -41,18 +68,18 @@ export function AppStateProvider({ children }: PropsWithChildren) {
     return () => controller.abort()
   }, [])
 
-  const toggleTheme = useCallback(() => {
-    setTheme((currentTheme) => (currentTheme === 'dark' ? 'light' : 'dark'))
+  const setThemeMode = useCallback((nextTheme: ThemeMode) => {
+    setTheme(nextTheme)
   }, [])
 
   const value = useMemo<AppStateValue>(
     () => ({
       theme,
-      toggleTheme,
+      setThemeMode,
       health,
       healthError,
     }),
-    [theme, toggleTheme, health, healthError],
+    [theme, setThemeMode, health, healthError],
   )
 
   return <AppStateContext.Provider value={value}>{children}</AppStateContext.Provider>
@@ -64,9 +91,23 @@ function getInitialTheme(): ThemeMode {
   }
 
   const stored = window.localStorage.getItem(themeStorageKey)
-  if (stored === 'light' || stored === 'dark') {
+  if (stored === 'light' || stored === 'dark' || stored === 'system') {
     return stored
   }
 
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+  return 'system'
+}
+
+function applyThemeMode(mode: ThemeMode) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  const root = document.documentElement
+  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+  const useDark = mode === 'dark' || (mode === 'system' && prefersDark)
+
+  root.classList.toggle('dark', useDark)
+  root.dataset.theme = useDark ? 'dark' : 'light'
+  root.style.colorScheme = useDark ? 'dark' : 'light'
 }

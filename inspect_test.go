@@ -134,6 +134,57 @@ func TestNormalizeInspectAuth(t *testing.T) {
 	}
 }
 
+func TestReadServerResource(t *testing.T) {
+	t.Parallel()
+
+	server := newTestMCPServer()
+	httpServer := httptest.NewServer(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
+		return server
+	}, nil))
+	defer httpServer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	inspectResult, err := inspectEndpoint(ctx, httpServer.URL, nil)
+	if err != nil {
+		t.Fatalf("inspectEndpoint returned error: %v", err)
+	}
+
+	store, err := newDataStore(t.TempDir() + "/data.json")
+	if err != nil {
+		t.Fatalf("newDataStore: %v", err)
+	}
+
+	stored := storedServer{
+		ID:            "server-1",
+		Name:          "fixture-server",
+		Endpoint:      httpServer.URL,
+		Auth:          inspectAuth{Type: "none"},
+		Status:        "ready",
+		InspectResult: inspectResult,
+	}
+	if err := store.appendServer(stored); err != nil {
+		t.Fatalf("appendServer: %v", err)
+	}
+
+	service := newServerService(store)
+	result, err := service.readServerResource(ctx, stored.ID, "file:///fixture.txt")
+	if err != nil {
+		t.Fatalf("readServerResource returned error: %v", err)
+	}
+
+	if len(result.Contents) != 1 {
+		t.Fatalf("expected 1 content block, got %d", len(result.Contents))
+	}
+	if result.Contents[0].MimeType != "text/plain" {
+		t.Fatalf("expected text/plain MIME type, got %q", result.Contents[0].MimeType)
+	}
+	if result.Contents[0].Text != "fixture resource body" {
+		t.Fatalf("expected fixture resource body, got %q", result.Contents[0].Text)
+	}
+}
+
 func newTestMCPServer() *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "fixture-server",
@@ -146,6 +197,21 @@ func newTestMCPServer() *mcp.Server {
 		Description: "Search the documentation index for matching entries.",
 	}, func(context.Context, *mcp.CallToolRequest, searchInput) (*mcp.CallToolResult, searchOutput, error) {
 		return &mcp.CallToolResult{}, searchOutput{}, nil
+	})
+
+	server.AddResource(&mcp.Resource{
+		URI:         "file:///fixture.txt",
+		Name:        "Fixture resource",
+		Description: "Fixture text resource",
+		MIMEType:    "text/plain",
+	}, func(_ context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+		return &mcp.ReadResourceResult{
+			Contents: []*mcp.ResourceContents{{
+				URI:      req.Params.URI,
+				MIMEType: "text/plain",
+				Text:     "fixture resource body",
+			}},
+		}, nil
 	})
 
 	return server

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -8,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type createServerInput struct {
@@ -68,6 +71,19 @@ type resourceSummary struct {
 type resourceDetail struct {
 	ServerID string `json:"serverId"`
 	resourceSummary
+}
+
+type resourceContentResponse struct {
+	ServerID string                `json:"serverId"`
+	Resource resourceSummary       `json:"resource"`
+	Contents []resourceContentPart `json:"contents"`
+}
+
+type resourceContentPart struct {
+	URI      string `json:"uri"`
+	MimeType string `json:"mimeType,omitempty"`
+	Text     string `json:"text,omitempty"`
+	Blob     string `json:"blob,omitempty"`
 }
 
 type serverService struct {
@@ -158,6 +174,16 @@ func (s *serverService) reinspectServer(ctx context.Context, id string) (serverD
 	return sanitizeServerDetail(updated), nil
 }
 
+func (s *serverService) deleteServer(id string) error {
+	if _, err := s.getStoredServer(id); err != nil {
+		return err
+	}
+	if err := s.store.deleteServer(id); err != nil {
+		return notFoundError{kind: "server"}
+	}
+	return nil
+}
+
 func (s *serverService) listServerTools(id string) ([]toolSummary, error) {
 	server, err := s.getStoredServer(id)
 	if err != nil {
@@ -229,6 +255,62 @@ func (s *serverService) getServerResource(id, resourceID string) (resourceDetail
 	}
 
 	return resourceDetail{}, notFoundError{kind: "resource"}
+}
+
+func (s *serverService) readServerResource(ctx context.Context, id, resourceID string) (resourceContentResponse, error) {
+	server, err := s.getStoredServer(id)
+	if err != nil {
+		return resourceContentResponse{}, err
+	}
+
+	resource, err := s.getServerResource(id, resourceID)
+	if err != nil {
+		return resourceContentResponse{}, err
+	}
+
+	preferredTransport := ""
+	if server.InspectResult != nil {
+		preferredTransport = server.InspectResult.Transport
+	}
+
+	session, _, err := connectMCP(ctx, server.Endpoint, &server.Auth, preferredTransport)
+	if err != nil {
+		return resourceContentResponse{}, err
+	}
+	defer session.Close()
+
+	result, err := session.ReadResource(ctx, &mcp.ReadResourceParams{URI: resourceID})
+	if err != nil {
+		return resourceContentResponse{}, err
+	}
+
+	contents := make([]resourceContentPart, 0, len(result.Contents))
+	for _, content := range result.Contents {
+		if content == nil {
+			continue
+		}
+
+		part := resourceContentPart{
+			URI:      content.URI,
+			MimeType: content.MIMEType,
+		}
+		if part.MimeType == "" {
+			part.MimeType = resource.MimeType
+		}
+		if content.Text != "" {
+			part.Text = content.Text
+		}
+		if len(content.Blob) > 0 {
+			part.Blob = base64.StdEncoding.EncodeToString(content.Blob)
+		}
+		contents = append(contents, part)
+	}
+
+	return resourceContentResponse{
+		ServerID: id,
+		Resource: resource.resourceSummary,
+		Contents: contents,
+	}, nil
 }
 
 func (s *serverService) inspectAndApply(ctx context.Context, server storedServer) storedServer {

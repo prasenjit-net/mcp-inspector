@@ -1,6 +1,16 @@
+import clsx from 'clsx'
+import {
+  Activity,
+  AlertTriangle,
+  Database,
+  Plus,
+  ShieldCheck,
+  Trash2,
+  Wrench,
+} from 'lucide-react'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { createServer, listServers } from '../lib/api'
+import { createServer, deleteServer, listServers } from '../lib/api'
 import type { CreateServerFormState, ServerStatus, ServerSummary } from '../types'
 
 const initialDraftServer: CreateServerFormState = {
@@ -21,6 +31,7 @@ export function ServersPage() {
   const [draftServer, setDraftServer] = useState<CreateServerFormState>(initialDraftServer)
   const [isCreatingServer, setIsCreatingServer] = useState(false)
   const [createServerError, setCreateServerError] = useState('')
+  const [deletingServerId, setDeletingServerId] = useState('')
 
   useEffect(() => {
     const controller = new AbortController()
@@ -31,10 +42,9 @@ export function ServersPage() {
         setServers(payload.servers)
         setLoadError('')
       } catch (error) {
-        if (controller.signal.aborted) {
-          return
+        if (!controller.signal.aborted) {
+          setLoadError(error instanceof Error ? error.message : 'Unable to load servers')
         }
-        setLoadError(error instanceof Error ? error.message : 'unable to load servers')
       } finally {
         if (!controller.signal.aborted) {
           setIsLoading(false)
@@ -53,6 +63,13 @@ export function ServersPage() {
     [servers],
   )
 
+  const metrics = useMemo(() => {
+    const ready = servers.filter((server) => server.status === 'ready').length
+    const issues = servers.filter((server) => server.status === 'error').length
+    const tools = servers.reduce((count, server) => count + server.toolCount, 0)
+    return { total: servers.length, ready, issues, tools }
+  }, [servers])
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setIsCreatingServer(true)
@@ -64,221 +81,250 @@ export function ServersPage() {
       setIsModalOpen(false)
       navigate(`/servers/${server.id}`)
     } catch (error) {
-      setCreateServerError(
-        error instanceof Error ? error.message : 'unable to create the server',
-      )
+      setCreateServerError(error instanceof Error ? error.message : 'Unable to create server')
     } finally {
       setIsCreatingServer(false)
     }
   }
 
+  async function handleDelete(server: ServerSummary) {
+    if (!window.confirm(`Remove ${server.name}?`)) {
+      return
+    }
+
+    setDeletingServerId(server.id)
+    try {
+      await deleteServer(server.id)
+      setServers((current) => current.filter((entry) => entry.id !== server.id))
+      setLoadError('')
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Unable to remove server')
+    } finally {
+      setDeletingServerId('')
+    }
+  }
+
   return (
-    <div className="page-stack">
-      <section className="page-intro">
-        <div>
-          <h2 className="section-title">Servers</h2>
-          <p className="section-copy">
-            Add MCP endpoints, inspect them on the backend, and open only sanitized tool
-            and resource details in the dashboard.
-          </p>
-        </div>
-
-        <button className="primary-button" type="button" onClick={() => setIsModalOpen(true)}>
-          Add Server
-        </button>
-      </section>
-
-      {loadError ? <p className="error-banner">{loadError}</p> : null}
-
-      {isLoading ? (
-        <section className="card empty-state">
-          <h3>Loading servers</h3>
-          <p>Fetching backend-managed server summaries.</p>
-        </section>
-      ) : sortedServers.length === 0 ? (
-        <section className="card empty-state">
-          <h3>No servers yet</h3>
-          <p>Add your first MCP server to start inspecting tools and metadata.</p>
-          <button className="primary-button" type="button" onClick={() => setIsModalOpen(true)}>
+    <div className="page-container page-stack-md servers-page">
+      <div className="servers-page-top">
+        <div className="page-header">
+          <div>
+            <h1 className="page-title">Servers</h1>
+            <p className="page-subtitle">
+              Add MCP endpoints, inspect them on the backend, and drill into tools or resources from a
+              single workspace.
+            </p>
+          </div>
+          <button className="primary-action" type="button" onClick={() => setIsModalOpen(true)}>
+            <Plus className="button-icon" />
             Add Server
           </button>
-        </section>
-      ) : (
-        <section className="server-grid">
-          {sortedServers.map((server) => (
-            <ServerCard key={server.id} server={server} />
-          ))}
-        </section>
-      )}
+        </div>
+
+        <div className="stats-grid servers-stats-grid">
+          <StatCard icon={Database} label="Total servers" value={String(metrics.total)} />
+          <StatCard icon={ShieldCheck} label="Ready" value={String(metrics.ready)} tone="green" />
+          <StatCard icon={AlertTriangle} label="Issues" value={String(metrics.issues)} tone="amber" />
+          <StatCard icon={Wrench} label="Tools" value={String(metrics.tools)} tone="violet" />
+        </div>
+
+        {loadError ? <div className="alert-error">{loadError}</div> : null}
+      </div>
+
+      <div className="servers-page-content">
+        {isLoading ? (
+          <div className="loading-grid">
+            {Array.from({ length: 3 }).map((_, index) => (
+              <div key={index} className="loading-card" />
+            ))}
+          </div>
+        ) : sortedServers.length === 0 ? (
+          <div className="empty-card">
+            <Database className="empty-icon" />
+            <h3>No servers yet</h3>
+            <p>Add your first MCP server to start inspecting tools and metadata.</p>
+            <button className="primary-action" type="button" onClick={() => setIsModalOpen(true)}>
+              <Plus className="button-icon" />
+              Add Server
+            </button>
+          </div>
+        ) : (
+          <div className="server-card-grid">
+            {sortedServers.map((server) => (
+              <article key={server.id} className="panel-card server-card">
+                <Link className="server-card-link server-card-link-compact" to={`/servers/${server.id}`}>
+                  <div className="server-card-top">
+                    <div>
+                      <h3>{server.name}</h3>
+                      <p className="server-endpoint">{server.endpoint}</p>
+                    </div>
+                    <span className={clsx('status-pill', `status-${server.status}`)}>
+                      {statusLabel(server.status)}
+                    </span>
+                  </div>
+
+                  <div className="server-badges">
+                    <span className="soft-pill">{server.transport || 'Unknown transport'}</span>
+                    <span className="soft-pill">{server.toolCount} tools</span>
+                    <span className="soft-pill">{server.resourceCount} resources</span>
+                  </div>
+
+                  <div className="server-card-footer server-card-footer-compact">
+                    <span className="server-card-copy">
+                      {server.lastInspectedAt ? `Inspected ${formatRelative(server.lastInspectedAt)}` : 'Inspection pending'}
+                    </span>
+                    {server.lastError ? <span className="server-card-issue">{server.lastError}</span> : null}
+                  </div>
+                </Link>
+
+                <button
+                  className="danger-ghost server-card-remove"
+                  type="button"
+                  disabled={deletingServerId === server.id}
+                  onClick={() => void handleDelete(server)}
+                >
+                  <Trash2 className="button-icon" />
+                  {deletingServerId === server.id ? 'Removing...' : 'Remove'}
+                </button>
+              </article>
+            ))}
+          </div>
+        )}
+      </div>
 
       {isModalOpen ? (
-        <div className="modal-root" role="dialog" aria-modal="true" aria-labelledby="add-server-title">
-          <button
-            className="modal-backdrop"
-            type="button"
-            aria-label="Close add server dialog"
-            onClick={() => setIsModalOpen(false)}
-          />
-
-          <section className="modal-card">
-            <div className="section-heading">
+        <div className="modal-backdrop" role="presentation" onClick={() => setIsModalOpen(false)}>
+          <div className="modal-card" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
               <div>
-                <h3 id="add-server-title">Add Server</h3>
+                <h3>Add Server</h3>
                 <p>Send credentials once, store them server-side, and inspect immediately.</p>
               </div>
             </div>
 
-            <form className="dashboard-form" onSubmit={handleSubmit}>
-              <div className="form-grid">
+            <form className="form-stack" onSubmit={handleSubmit}>
+              <label className="field">
+                <span>Display name</span>
+                <input
+                  type="text"
+                  value={draftServer.name}
+                  placeholder="Production MCP"
+                  onChange={(event) =>
+                    setDraftServer((current) => ({ ...current, name: event.target.value }))
+                  }
+                />
+              </label>
+
+              <label className="field">
+                <span>Endpoint</span>
+                <input
+                  type="url"
+                  value={draftServer.endpoint}
+                  placeholder="https://example.com/mcp"
+                  onChange={(event) =>
+                    setDraftServer((current) => ({ ...current, endpoint: event.target.value }))
+                  }
+                />
+              </label>
+
+              <label className="field">
+                <span>Authorization</span>
+                <select
+                  value={draftServer.authType}
+                  onChange={(event) =>
+                    setDraftServer((current) => ({
+                      ...current,
+                      authType: event.target.value as CreateServerFormState['authType'],
+                    }))
+                  }
+                >
+                  <option value="none">None</option>
+                  <option value="bearer">Bearer token</option>
+                  <option value="header">Custom header</option>
+                </select>
+              </label>
+
+              {draftServer.authType === 'bearer' ? (
                 <label className="field">
-                  <span>Display name</span>
+                  <span>Bearer token</span>
                   <input
-                    type="text"
-                    value={draftServer.name}
+                    type="password"
+                    value={draftServer.bearerToken}
+                    placeholder="sk-..."
                     onChange={(event) =>
-                      setDraftServer((current) => ({ ...current, name: event.target.value }))
+                      setDraftServer((current) => ({ ...current, bearerToken: event.target.value }))
                     }
-                    placeholder="Production MCP"
                   />
                 </label>
+              ) : null}
 
-                <label className="field field-span-2">
-                  <span>Endpoint</span>
-                  <input
-                    type="url"
-                    value={draftServer.endpoint}
-                    onChange={(event) =>
-                      setDraftServer((current) => ({
-                        ...current,
-                        endpoint: event.target.value,
-                      }))
-                    }
-                    placeholder="https://example.com/mcp"
-                  />
-                </label>
-
-                <label className="field">
-                  <span>Authorization</span>
-                  <select
-                    value={draftServer.authType}
-                    onChange={(event) =>
-                      setDraftServer((current) => ({
-                        ...current,
-                        authType: event.target.value as CreateServerFormState['authType'],
-                      }))
-                    }
-                  >
-                    <option value="none">None</option>
-                    <option value="bearer">Bearer token</option>
-                    <option value="header">Custom header</option>
-                  </select>
-                </label>
-
-                {draftServer.authType === 'bearer' ? (
-                  <label className="field field-span-2">
-                    <span>Bearer token</span>
+              {draftServer.authType === 'header' ? (
+                <div className="field-grid">
+                  <label className="field">
+                    <span>Header name</span>
                     <input
-                      type="password"
-                      value={draftServer.bearerToken}
+                      type="text"
+                      value={draftServer.headerName}
+                      placeholder="X-API-Key"
                       onChange={(event) =>
-                        setDraftServer((current) => ({
-                          ...current,
-                          bearerToken: event.target.value,
-                        }))
+                        setDraftServer((current) => ({ ...current, headerName: event.target.value }))
                       }
-                      placeholder="sk-..."
                     />
                   </label>
-                ) : null}
+                  <label className="field">
+                    <span>Header value</span>
+                    <input
+                      type="password"
+                      value={draftServer.headerValue}
+                      placeholder="Secret value"
+                      onChange={(event) =>
+                        setDraftServer((current) => ({ ...current, headerValue: event.target.value }))
+                      }
+                    />
+                  </label>
+                </div>
+              ) : null}
 
-                {draftServer.authType === 'header' ? (
-                  <>
-                    <label className="field">
-                      <span>Header name</span>
-                      <input
-                        type="text"
-                        value={draftServer.headerName}
-                        onChange={(event) =>
-                          setDraftServer((current) => ({
-                            ...current,
-                            headerName: event.target.value,
-                          }))
-                        }
-                        placeholder="X-API-Key"
-                      />
-                    </label>
+              {createServerError ? <div className="alert-error">{createServerError}</div> : null}
 
-                    <label className="field field-span-2">
-                      <span>Header value</span>
-                      <input
-                        type="password"
-                        value={draftServer.headerValue}
-                        onChange={(event) =>
-                          setDraftServer((current) => ({
-                            ...current,
-                            headerValue: event.target.value,
-                          }))
-                        }
-                        placeholder="secret value"
-                      />
-                    </label>
-                  </>
-                ) : null}
-              </div>
-
-              {createServerError ? <p className="error-banner">{createServerError}</p> : null}
-
-              <div className="form-actions">
-                <button className="primary-button" type="submit" disabled={isCreatingServer}>
-                  {isCreatingServer ? 'Saving...' : 'Save and inspect'}
-                </button>
-                <button
-                  className="secondary-button"
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                >
+              <div className="modal-actions">
+                <button className="secondary-action" type="button" onClick={() => setIsModalOpen(false)}>
                   Cancel
+                </button>
+                <button className="primary-action" type="submit" disabled={isCreatingServer}>
+                  <Plus className="button-icon" />
+                  {isCreatingServer ? 'Saving...' : 'Save and inspect'}
                 </button>
               </div>
             </form>
-          </section>
+          </div>
         </div>
       ) : null}
     </div>
   )
 }
 
-function ServerCard({ server }: { server: ServerSummary }) {
+function StatCard({
+  icon: Icon,
+  label,
+  value,
+  tone = 'blue',
+}: {
+  icon: typeof Activity
+  label: string
+  value: string
+  tone?: 'blue' | 'green' | 'amber' | 'violet'
+}) {
   return (
-    <Link className="card server-card" to={`/servers/${server.id}`}>
-      <div className="server-card-header">
-        <div>
-          <h3>{server.name}</h3>
-          <p className="server-card-endpoint">{server.endpoint}</p>
-        </div>
-        <span className={`status-badge status-${server.status}`}>{statusLabel(server.status)}</span>
+    <div className="panel-card stat-card servers-stat-card">
+      <div className={clsx('stat-icon', `stat-icon-${tone}`, 'servers-stat-icon')}>
+        <Icon className="stat-icon-svg" />
       </div>
-
-      <div className="server-card-metrics">
-        <div>
-          <span className="summary-label">Tools</span>
-          <strong>{server.toolCount}</strong>
-        </div>
-        <div>
-          <span className="summary-label">Resources</span>
-          <strong>{server.resourceCount}</strong>
-        </div>
-        <div>
-          <span className="summary-label">Transport</span>
-          <strong>{server.transport || 'Unknown'}</strong>
-        </div>
+      <div className="servers-stat-copy">
+        <p className="stat-label">{label}</p>
+        <p className="stat-value servers-stat-value">{value}</p>
       </div>
-
-      <div className="server-card-footer">
-        <span>{server.lastInspectedAt ? `Inspected ${formatRelative(server.lastInspectedAt)}` : 'Not inspected yet'}</span>
-        <span className="server-card-link">Open</span>
-      </div>
-    </Link>
+    </div>
   )
 }
 
@@ -289,7 +335,7 @@ function statusLabel(status: ServerStatus) {
     case 'pending':
       return 'Inspecting'
     default:
-      return 'Needs attention'
+      return 'Attention'
   }
 }
 
@@ -297,15 +343,8 @@ function formatRelative(timestamp: string) {
   const delta = Date.now() - new Date(timestamp).getTime()
   const minutes = Math.max(1, Math.round(delta / 60000))
 
-  if (minutes < 60) {
-    return `${minutes}m ago`
-  }
-
+  if (minutes < 60) return `${minutes}m ago`
   const hours = Math.round(minutes / 60)
-  if (hours < 24) {
-    return `${hours}h ago`
-  }
-
-  const days = Math.round(hours / 24)
-  return `${days}d ago`
+  if (hours < 24) return `${hours}h ago`
+  return `${Math.round(hours / 24)}d ago`
 }

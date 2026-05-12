@@ -1,6 +1,7 @@
 import type {
   AuthType,
   CreateServerFormState,
+  ResourceContentResponse,
   ResourceDetail,
   ServerDetail,
   ServerSummary,
@@ -37,6 +38,12 @@ export async function reinspectServer(serverId: string) {
   })
 }
 
+export async function deleteServer(serverId: string) {
+  return requestVoid(`/api/servers/${serverId}`, {
+    method: 'DELETE',
+  })
+}
+
 export async function getTool(serverId: string, toolName: string, signal?: AbortSignal) {
   return requestJSON<ToolDetail>(
     `/api/servers/${serverId}/tools/${encodeURIComponent(toolName)}`,
@@ -55,6 +62,13 @@ export async function getResource(
   )
 }
 
+export async function readResourceContent(serverId: string, resourceId: string) {
+  return requestJSON<ResourceContentResponse>(
+    `/api/servers/${serverId}/resources/${encodeURIComponent(resourceId)}/content`,
+    { method: 'POST' },
+  )
+}
+
 async function requestJSON<T>(input: RequestInfo | URL, init?: RequestInit) {
   const response = await fetch(input, init)
   const payload = (await response.json().catch(() => ({}))) as T & APIError
@@ -62,6 +76,15 @@ async function requestJSON<T>(input: RequestInfo | URL, init?: RequestInit) {
     throw new Error(payload.error || `request failed: ${response.status}`)
   }
   return payload as T
+}
+
+async function requestVoid(input: RequestInfo | URL, init?: RequestInit) {
+  const response = await fetch(input, init)
+  if (response.ok) {
+    return
+  }
+  const payload = (await response.json().catch(() => ({}))) as APIError
+  throw new Error(payload.error || `request failed: ${response.status}`)
 }
 
 function buildAuthPayload(input: CreateServerFormState) {

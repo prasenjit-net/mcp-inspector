@@ -322,10 +322,7 @@ func buildOpenAITools(servers []storedServer) (map[string]agentToolBinding, []op
 			usedNames[name]++
 
 			description := strings.TrimSpace(fmt.Sprintf("%s (Server: %s)", tool.Description, server.Name))
-			parameters := tool.InputSchema
-			if parameters == nil {
-				parameters = map[string]any{"type": "object"}
-			}
+			parameters := sanitizeOpenAIParametersSchema(tool.InputSchema)
 
 			binding := agentToolBinding{
 				OpenAIName: name,
@@ -350,6 +347,64 @@ func buildOpenAITools(servers []storedServer) (map[string]agentToolBinding, []op
 	})
 
 	return bindings, tools
+}
+
+func sanitizeOpenAIParametersSchema(value any) map[string]any {
+	schema, ok := normalizeJSONValue(value).(map[string]any)
+	if !ok || schema == nil {
+		return map[string]any{
+			"type":       "object",
+			"properties": map[string]any{},
+		}
+	}
+
+	sanitized, ok := sanitizeOpenAISchemaNode(schema).(map[string]any)
+	if !ok || sanitized == nil {
+		return map[string]any{
+			"type":       "object",
+			"properties": map[string]any{},
+		}
+	}
+
+	if _, hasType := sanitized["type"]; !hasType {
+		sanitized["type"] = "object"
+	}
+	if _, hasProperties := sanitized["properties"]; !hasProperties {
+		sanitized["properties"] = map[string]any{}
+	}
+
+	return sanitized
+}
+
+func sanitizeOpenAISchemaNode(value any) any {
+	switch node := value.(type) {
+	case map[string]any:
+		sanitized := make(map[string]any, len(node))
+		for key, child := range node {
+			sanitized[key] = sanitizeOpenAISchemaNode(child)
+		}
+
+		if schemaType, ok := sanitized["type"].(string); ok && schemaType == "array" {
+			items, exists := sanitized["items"]
+			if !exists || items == nil {
+				sanitized["items"] = map[string]any{}
+			} else {
+				if _, ok := items.(map[string]any); !ok {
+					sanitized["items"] = map[string]any{}
+				}
+			}
+		}
+
+		return sanitized
+	case []any:
+		sanitized := make([]any, 0, len(node))
+		for _, child := range node {
+			sanitized = append(sanitized, sanitizeOpenAISchemaNode(child))
+		}
+		return sanitized
+	default:
+		return node
+	}
 }
 
 func buildSystemPrompt(servers []storedServer) string {

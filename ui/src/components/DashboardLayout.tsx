@@ -1,152 +1,172 @@
-import { useMemo, useState } from 'react'
-import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
+import clsx from 'clsx'
+import {
+  Bot,
+  Database,
+  Menu,
+  Monitor,
+  Moon,
+  Sun,
+  X,
+} from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { NavLink, Outlet } from 'react-router-dom'
 import { useAppState } from '../state/useAppState'
+import type { ThemeMode } from '../types'
 
 const navigationItems = [
-  { to: '/servers', label: 'Servers', icon: '▣' },
-  { to: '/agent', label: 'Agent', icon: '✦' },
+  { to: '/servers', icon: Database, label: 'Servers' },
+  { to: '/agent', icon: Bot, label: 'Agent' },
+]
+
+const themeOptions: Array<{ value: ThemeMode; label: string; icon: typeof Sun }> = [
+  { value: 'light', label: 'Light', icon: Sun },
+  { value: 'system', label: 'System', icon: Monitor },
+  { value: 'dark', label: 'Dark', icon: Moon },
 ]
 
 export function DashboardLayout() {
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
-  const location = useLocation()
-  const { health, healthError, theme, toggleTheme } = useAppState()
+  const { health, healthError, theme, setThemeMode } = useAppState()
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
 
-  const breadcrumbs = useMemo(() => {
-    const segments = location.pathname.split('/').filter(Boolean)
-    if (segments.length === 0 || segments[0] === 'servers') {
-      const items = [{ label: 'Servers', to: '/servers' }]
+  useEffect(() => {
+    if (!isSidebarOpen) return
 
-      if (segments[1]) {
-        items.push({ label: 'Details', to: location.pathname })
-      }
-
-      if (segments[2] === 'tools' && segments[3]) {
-        items.push({ label: 'Tool', to: location.pathname })
-      }
-
-      if (segments[2] === 'resources' && segments[3]) {
-        items.push({ label: 'Resource', to: location.pathname })
-      }
-
-      return items
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = previousOverflow
     }
+  }, [isSidebarOpen])
 
-    return [{ label: 'Agent', to: '/agent' }]
-  }, [location.pathname])
+  const CurrentThemeIcon = useMemo(() => {
+    switch (theme) {
+      case 'light':
+        return Sun
+      case 'dark':
+        return Moon
+      default:
+        return Monitor
+    }
+  }, [theme])
 
-  const currentPageTitle = breadcrumbs[breadcrumbs.length - 1]?.label ?? 'Servers'
+  function cycleThemeMode() {
+    switch (theme) {
+      case 'light':
+        setThemeMode('dark')
+        break
+      case 'dark':
+        setThemeMode('system')
+        break
+      default:
+        setThemeMode('light')
+        break
+    }
+  }
 
   return (
-    <div className={`dashboard-shell${sidebarCollapsed ? ' is-sidebar-collapsed' : ''}`}>
-      <aside
-        className={[
-          'sidebar',
-          sidebarCollapsed ? 'is-collapsed' : '',
-          mobileSidebarOpen ? 'is-mobile-open' : '',
-        ]
-          .filter(Boolean)
-          .join(' ')}
-      >
-        <div className="sidebar-header">
-          <Link className="brand" to="/servers" onClick={() => setMobileSidebarOpen(false)}>
-            <span className="brand-mark">M</span>
-            {!sidebarCollapsed ? (
-              <span className="brand-copy">
-                <strong>MCP Inspector</strong>
-                <span>Control center</span>
-              </span>
-            ) : null}
-          </Link>
-
-          <button
-            className="icon-button sidebar-collapse-button"
-            type="button"
-            onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
-            aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          >
-            {sidebarCollapsed ? '>' : '<'}
-          </button>
-        </div>
-
-        <nav className="sidebar-nav" aria-label="Primary navigation">
-          {navigationItems.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              onClick={() => setMobileSidebarOpen(false)}
-              className={({ isActive }) =>
-                ['sidebar-link', isActive ? 'is-active' : ''].filter(Boolean).join(' ')
-              }
-              end={item.to === '/servers'}
-            >
-              <span className="sidebar-link-icon" aria-hidden="true">
-                {item.icon}
-              </span>
-              {!sidebarCollapsed ? <span>{item.label}</span> : null}
-            </NavLink>
-          ))}
-        </nav>
-      </aside>
-
-      {mobileSidebarOpen ? (
+    <div className="app-shell">
+      {isSidebarOpen ? (
         <button
-          className="sidebar-backdrop"
+          className="app-sidebar-backdrop"
           type="button"
           aria-label="Close navigation"
-          onClick={() => setMobileSidebarOpen(false)}
+          onClick={() => setIsSidebarOpen(false)}
         />
       ) : null}
 
-      <div className="dashboard-main">
-        <header className="topbar">
-          <div className="topbar-main">
-            <button
-              className="icon-button mobile-nav-button"
-              type="button"
-              aria-label="Open navigation"
-              onClick={() => setMobileSidebarOpen(true)}
-            >
-              =
-            </button>
+      <aside className={clsx('app-sidebar', isSidebarOpen && 'app-sidebar-open')}>
+        <div className="sidebar-brand">
+          <div className="brand-mark">M</div>
+          <div>
+            <div className="brand-title">MCP Inspector</div>
+            <div className="brand-subtitle">Server control center</div>
+          </div>
+          <button
+            className="icon-button sidebar-close-button"
+            type="button"
+            aria-label="Close navigation"
+            onClick={() => setIsSidebarOpen(false)}
+          >
+            <X className="button-icon" />
+          </button>
+        </div>
 
-            <div>
-              <div className="app-kicker">MCP Inspector</div>
-              <div className="breadcrumb-row" aria-label="Breadcrumb">
-                {breadcrumbs.map((item, index) => (
-                  <span key={item.to} className="breadcrumb-item">
-                    {index > 0 ? <span className="breadcrumb-separator">/</span> : null}
-                    {index === breadcrumbs.length - 1 ? (
-                      <span>{item.label}</span>
-                    ) : (
-                      <Link className="breadcrumb-link" to={item.to}>
-                        {item.label}
-                      </Link>
-                    )}
-                  </span>
-                ))}
-              </div>
-              <h1 className="page-title">{currentPageTitle}</h1>
-            </div>
+        <nav className="sidebar-nav" aria-label="Primary">
+          <ul className="nav-list">
+            {navigationItems.map((item) => (
+              <li key={item.to}>
+                <NavLink
+                  to={item.to}
+                  end={item.to === '/servers'}
+                  className={({ isActive }) =>
+                    clsx('nav-link', isActive && 'nav-link-active')
+                  }
+                  onClick={() => setIsSidebarOpen(false)}
+                >
+                  <item.icon className="nav-link-icon" />
+                  {item.label}
+                </NavLink>
+              </li>
+            ))}
+          </ul>
+        </nav>
+
+        <div className="sidebar-footer">
+          <div className="theme-section-label">Theme</div>
+          <div className="theme-switcher">
+            {themeOptions.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => setThemeMode(option.value)}
+                aria-pressed={theme === option.value}
+                className={clsx('theme-button', theme === option.value && 'theme-button-active')}
+              >
+                <option.icon className="theme-button-icon" />
+                {option.label}
+              </button>
+            ))}
           </div>
 
-          <div className="topbar-actions">
-            <div className="status-chip" aria-live="polite">
-              <span className={health ? 'status-dot is-healthy' : 'status-dot'} />
-              <span>{health ? `${health.name} ${health.version}` : healthError || 'Backend unavailable'}</span>
+          <div className="sidebar-health">
+            <div className="sidebar-health-title">{health?.name || 'Backend status'}</div>
+            <div className="sidebar-health-copy">
+              {health ? `${health.version} · Online` : healthError || 'Unavailable'}
             </div>
-
-            <button className="theme-toggle" type="button" onClick={toggleTheme}>
-              {theme === 'dark' ? 'Light mode' : 'Dark mode'}
-            </button>
           </div>
-        </header>
+        </div>
+      </aside>
 
-        <main className="page-content">
+      <main className="app-main">
+        <div className="app-mobile-header">
+          <button
+            className="icon-button"
+            type="button"
+            aria-label="Open navigation"
+            onClick={() => setIsSidebarOpen(true)}
+          >
+            <Menu className="button-icon" />
+          </button>
+
+          <div className="app-mobile-title">
+            <div className="brand-title">MCP Inspector</div>
+            <div className="brand-subtitle">Server control center</div>
+          </div>
+
+          <button
+            className="icon-button"
+            type="button"
+            aria-label={`Switch theme mode. Current: ${theme}`}
+            onClick={cycleThemeMode}
+          >
+            <CurrentThemeIcon className="button-icon" />
+          </button>
+        </div>
+
+        <div className="app-content">
           <Outlet />
-        </main>
-      </div>
+        </div>
+      </main>
     </div>
   )
 }
