@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"os"
+	"strconv"
 
 	"github.com/BurntSushi/toml"
 )
@@ -40,6 +41,26 @@ func loadConfig() (appConfig, error) {
 				return appConfig{}, err
 			}
 		}
+	}
+
+	// Environment variables override file-based config values.
+	// This allows secrets and deployment-specific settings to be injected
+	// without modifying the config file (e.g. in Docker / Kubernetes).
+	if v := os.Getenv("MCP_APP_PORT"); v != "" {
+		port, err := strconv.Atoi(v)
+		if err != nil {
+			return appConfig{}, errors.New("MCP_APP_PORT must be a valid integer")
+		}
+		config.AppPort = port
+	}
+	if v := os.Getenv("MCP_OPENAI_API_KEY"); v != "" {
+		config.OpenAI.APIKey = v
+	}
+	if v := os.Getenv("MCP_OPENAI_MODEL"); v != "" {
+		config.OpenAI.Model = v
+	}
+	if v := os.Getenv("MCP_OPENAI_BASE_URL"); v != "" {
+		config.OpenAI.BaseURL = v
 	}
 
 	if config.AppPort == 0 {
