@@ -30,15 +30,19 @@ type agentService struct {
 	config   appConfig
 	servers  *serverService
 	client   *http.Client
+	// mu protects the sessions map and each session's lastAccessedAt field.
 	mu       sync.Mutex
 	sessions map[string]*agentSession
 }
 
+// agentSession holds per-conversation state.
+// lastAccessedAt is always read/written under agentService.mu.
+// Messages is read/written under the session's own mu.
 type agentSession struct {
 	ID             string
-	mu             sync.Mutex
+	mu             sync.Mutex     // guards Messages
 	Messages       []openAIChatMessage
-	lastAccessedAt time.Time
+	lastAccessedAt time.Time      // guarded by agentService.mu
 }
 
 type agentChatRequest struct {
