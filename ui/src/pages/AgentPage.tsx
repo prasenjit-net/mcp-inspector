@@ -1,6 +1,7 @@
 import clsx from 'clsx'
 import { Bot, Plus, Send } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import ReactMarkdown from 'react-markdown'
 import { listServers } from '../lib/api'
 
 const CURRENT_CHAT_STORAGE_KEY = 'mcp-inspector.agent.current-chat'
@@ -199,7 +200,13 @@ export function AgentPage() {
                 {messages.map((message) => (
                   <article key={message.id} className={clsx('chat-bubble', `chat-bubble-${message.role}`)}>
                     <div className="chat-role">{message.role === 'user' ? 'You' : 'Agent'}</div>
-                    <p className="chat-copy">{message.content || 'Working…'}</p>
+                    {message.role === 'assistant' ? (
+                      <div className="chat-copy chat-copy-markdown">
+                        <ReactMarkdown>{message.content || 'Working…'}</ReactMarkdown>
+                      </div>
+                    ) : (
+                      <p className="chat-copy">{message.content}</p>
+                    )}
                   </article>
                 ))}
               </div>

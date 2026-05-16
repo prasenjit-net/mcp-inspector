@@ -24,6 +24,8 @@ type application struct {
 	agent   *agentService
 }
 
+const sessionTTL = time.Hour
+
 type agentService struct {
 	config   appConfig
 	servers  *serverService
@@ -33,9 +35,10 @@ type agentService struct {
 }
 
 type agentSession struct {
-	ID       string
-	mu       sync.Mutex
-	Messages []openAIChatMessage
+	ID             string
+	mu             sync.Mutex
+	Messages       []openAIChatMessage
+	lastAccessedAt time.Time
 }
 
 type agentChatRequest struct {
@@ -98,17 +101,19 @@ func newApplication(config appConfig) (*application, error) {
 		return nil, err
 	}
 	servers := newServerService(store)
+	agent := &agentService{
+		config:  config,
+		servers: servers,
+		client: &http.Client{
+			Timeout: 60 * time.Second,
+		},
+		sessions: make(map[string]*agentSession),
+	}
+	agent.startSessionReaper()
 	return &application{
 		config:  config,
 		servers: servers,
-		agent: &agentService{
-			config:  config,
-			servers: servers,
-			client: &http.Client{
-				Timeout: 60 * time.Second,
-			},
-			sessions: make(map[string]*agentSession),
-		},
+		agent:   agent,
 	}, nil
 }
 
@@ -173,15 +178,36 @@ func (s *agentService) getOrCreateSession(id string) *agentSession {
 
 	if id != "" {
 		if session, ok := s.sessions[id]; ok {
+			session.lastAccessedAt = time.Now()
 			return session
 		}
 	}
 
 	session := &agentSession{
-		ID: newSessionID(),
+		ID:             newSessionID(),
+		lastAccessedAt: time.Now(),
 	}
 	s.sessions[session.ID] = session
 	return session
+}
+
+// startSessionReaper launches a background goroutine that evicts sessions
+// that have not been accessed for longer than sessionTTL.
+func (s *agentService) startSessionReaper() {
+	go func() {
+		ticker := time.NewTicker(sessionTTL / 2)
+		defer ticker.Stop()
+		for range ticker.C {
+			s.mu.Lock()
+			cutoff := time.Now().Add(-sessionTTL)
+			for id, session := range s.sessions {
+				if session.lastAccessedAt.Before(cutoff) {
+					delete(s.sessions, id)
+				}
+			}
+			s.mu.Unlock()
+		}
+	}()
 }
 
 func (s *agentService) runChat(ctx context.Context, session *agentSession, userMessage string, emit eventEmitter) error {
@@ -241,9 +267,9 @@ func (s *agentService) runChat(ctx context.Context, session *agentSession, userM
 				"arguments": toolCall.Function.Arguments,
 			})
 
-			result, err := callRemoteTool(ctx, binding.Server, binding.Tool.Name, toolCall.Function.Arguments)
-			if err != nil {
-				return err
+			result, toolErr := callRemoteTool(ctx, binding.Server, binding.Tool.Name, toolCall.Function.Arguments)
+			if toolErr != nil {
+				result = fmt.Sprintf("tool call failed: %v", toolErr)
 			}
 
 			emit("tool_result", map[string]string{
